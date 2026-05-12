@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { BRAND, LANGUAGES, ROOMS, FEATURES, FOOTER_TEXT, MODE } from "@/lib/config";
+import { BRAND, LANGUAGES, ALL_LANGUAGES, ROOMS, FEATURES, FOOTER_TEXT, MODE } from "@/lib/config";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -13,38 +13,37 @@ type Message = {
   original_text: string; translations: Record<string, string> | string; created_at: string;
 };
 
-// 表示テキストを返す
-// 自分のメッセージ → 原文のみ
-// 他人のメッセージ → { main: 母国語訳, sub: 日本語訳 } (日本語ユーザーは母国語訳のみ)
+// 2段表示テキストを返す（2026-05-13 仕様）
+// 設計思想:
+//   - 外国人ユーザー受信時の上段は常に「日本語」（日本語学習効果）
+//   - 自分の発言は原文を上段（楽に入力できる安心感）
+//   - タガログ訳（tl）は表示に使わない（古いタガログ問題回避）
 function getDisplayText(msg: Message, viewerLang: string, isMe: boolean): { main: string; sub: string; subLang: string } {
-  if (isMe) {
-    return { main: msg.original_text, sub: "", subLang: "" };
-  }
-  let t: Record<string, string>;
+  let t: Record<string, string> = {};
   try {
-    t = typeof msg.translations === "string" ? JSON.parse(msg.translations) : msg.translations;
+    t = typeof msg.translations === "string" ? JSON.parse(msg.translations) : (msg.translations ?? {});
   } catch {
-    return { main: msg.original_text, sub: "", subLang: "" };
+    t = {};
   }
-  const v = (k: string) => (t[k] ?? "").trim();
+  // 翻訳キーが空（=送信元と同じ言語）の場合は原文にフォールバック
+  const tr = (k: string) => ((t?.[k] ?? "").trim() || msg.original_text);
 
   if (viewerLang === "ja") {
-    // 日本語ユーザー：日本語訳が main、外国語の発言なら原文を sub に併記
-    const ja = v("ja") || msg.original_text;
-    if (msg.sender_lang && msg.sender_lang !== "ja") {
-      return { main: ja, sub: msg.original_text, subLang: msg.sender_lang };
-    }
-    return { main: ja, sub: "", subLang: "" };
+    return isMe
+      ? { main: msg.original_text, sub: tr("en"), subLang: "en" }
+      : { main: tr("ja"),          sub: tr("en"), subLang: "en" };
   }
-  // 外国語ユーザー：母国語訳＋日本語訳（または日本語原文）の2行
-  const native = v(viewerLang) || msg.original_text;
-  // 送信者が日本語の場合、translations.ja は空文字（API仕様）
-  // → original_text（日本語原文）にフォールバック
-  const japanese = v("ja") || msg.original_text;
-  if (japanese === native) {
-    return { main: native, sub: "", subLang: "" };
+  if (viewerLang === "tl") {
+    return isMe
+      ? { main: msg.original_text, sub: tr("ja"), subLang: "ja" }
+      : { main: tr("ja"),          sub: tr("en"), subLang: "en" };
   }
-  return { main: native, sub: japanese, subLang: "ja" };
+  if (viewerLang === "vi") {
+    return isMe
+      ? { main: msg.original_text, sub: tr("ja"), subLang: "ja" }
+      : { main: tr("ja"),          sub: tr("vi"), subLang: "vi" };
+  }
+  return { main: msg.original_text, sub: "", subLang: "" };
 }
 
 export default function Chat({ name, langCode, room, onBack }: {
@@ -187,7 +186,7 @@ export default function Chat({ name, langCode, room, onBack }: {
                   <div>{displayMain}</div>
                   {displaySub && (
                     <div style={{ fontSize: "12px", color: isMe ? "rgba(255,255,255,0.75)" : "#6b7280", marginTop: "4px", borderTop: isMe ? "1px solid rgba(255,255,255,0.2)" : "1px solid #e5e7eb", paddingTop: "4px" }}>
-                      {LANGUAGES.find(l => l.code === displaySubLang)?.flag || ""} {displaySub}
+                      {ALL_LANGUAGES.find(l => l.code === displaySubLang)?.flag || ""} {displaySub}
                     </div>
                   )}
                 </div>
